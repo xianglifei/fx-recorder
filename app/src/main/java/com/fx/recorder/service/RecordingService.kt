@@ -34,6 +34,7 @@ class RecordingService : Service(), RecordingEngine.Callback {
     private var engine: RecordingEngine? = null
     private var transferServer: com.fx.recorder.transfer.HttpTransferServer? = null
     private var wakeLock: PowerManager.WakeLock? = null
+    private var wifiLock: android.net.wifi.WifiManager.WifiLock? = null
     private var userStopRequested = false
 
     override fun onCreate() {
@@ -201,11 +202,21 @@ class RecordingService : Service(), RecordingEngine.Callback {
             // 常驻录音可能跨多天，无限期持有；onDestroy 必然 release
             acquire()
         }
+        // 锁屏后 MIUI 会挂起 WiFi 无线电（夜间实测：录音不断但 HTTP 大面积不可达）。
+        // 前台服务持有 WifiLock 保持局域网可达（Mac 管线依赖 HTTP 拉取）。
+        val wm = getSystemService(android.net.wifi.WifiManager::class.java) ?: return
+        wifiLock = wm.createWifiLock(
+            android.net.wifi.WifiManager.WIFI_MODE_FULL_HIGH_PERF, "fx-recorder:wifi").apply {
+            setReferenceCounted(false)
+            acquire()
+        }
     }
 
     private fun releaseWakeLock() {
         runCatching { wakeLock?.takeIf { it.isHeld }?.release() }
         wakeLock = null
+        runCatching { wifiLock?.takeIf { it.isHeld }?.release() }
+        wifiLock = null
     }
 
     companion object {
