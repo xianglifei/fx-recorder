@@ -9,3 +9,6 @@
 .externalNativeBuild
 .cxx
 .kotlin
+
+# 本地需求文档（含内部信息，不推送）
+docs/
