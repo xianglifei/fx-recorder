@@ -122,6 +122,7 @@ def sync_once(cfg):
         if now - st.get("last_success_ts", now) > 30 * 60_000 and not st.get("offline_alerted"):
             notify_mac("fx-recorder", "手机超过 30 分钟不可达，录音或网络可能中断")
             st["offline_alerted"] = True
+            log("已发送离线告警通知（>30min 不可达）")
         st["errors"] = ([f"phone unreachable: {e}"] + st.get("errors", []))[:20]
         save_state(st)
         log(f"手机不可达: {e}")
