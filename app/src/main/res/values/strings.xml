@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">fx-recorder</string>
+    <string name="notif_channel_status">录音状态</string>
+    <string name="notif_channel_alerts">异常提醒</string>
+    <string name="notif_recording_title">录音中</string>
+    <string name="notif_idle_title">待机</string>
+    <string name="notif_action_stop">停止录音</string>
+    <string name="notif_action_split">切分话题</string>
+    <string name="notif_action_meeting_start">会议开始</string>
+    <string name="notif_action_meeting_end">会议结束</string>
+    <string name="mic_occupied_alert">麦克风可能被其他应用占用，已自动重试</string>
+    <string name="disk_low_alert">存储空间不足，已自动清理最早的已上传录音</string>
+</resources>
