@@ -1,0 +1,138 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>fx-recorder 控制台</title>
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  body { font-family: -apple-system, "PingFang SC", sans-serif; background: #f4f6f8; color: #1c2430;
+         padding: 16px; font-size: 14px; }
+  .topbar { display: flex; align-items: center; gap: 12px; background: #fff; border-radius: 12px;
+            padding: 14px 18px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+  .dot { width: 12px; height: 12px; border-radius: 50%; background: #bbb; }
+  .dot.on { background: #2eaf54; box-shadow: 0 0 6px #2eaf5488; }
+  .dot.phone-off { background: #d84315; }
+  h1 { font-size: 16px; font-weight: 600; flex: 1; }
+  button { border: 0; border-radius: 8px; padding: 8px 14px; font-size: 13px; cursor: pointer;
+           background: #e8edf2; color: #1c2430; }
+  button.primary { background: #0288d1; color: #fff; }
+  button.danger { background: #fbe9e7; color: #bf360c; }
+  button:disabled { opacity: .45; cursor: default; }
+  .stats { display: flex; gap: 10px; margin: 12px 0; }
+  .stat { flex: 1; background: #fff; border-radius: 12px; padding: 12px 14px;
+          box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+  .stat b { display: block; font-size: 20px; margin-top: 2px; }
+  .stat span { color: #7a8899; font-size: 12px; }
+  .list { background: #fff; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.06); overflow: hidden; }
+  .row { display: flex; align-items: center; gap: 10px; padding: 11px 16px; border-bottom: 1px solid #eef2f5; }
+  .row:last-child { border-bottom: 0; }
+  .row .main { flex: 1; min-width: 0; }
+  .row .title { font-weight: 600; }
+  .row .sub { color: #7a8899; font-size: 12px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: #eef2f5; color: #5a6b7d; }
+  .badge.meeting { background: #e1f2fc; color: #0277bd; }
+  .badge.done { background: #e6f5ea; color: #2e7d46; }
+  .badge.pending { background: #fdf3e0; color: #a06b00; }
+  .badge.low { background: #f0f0f0; color: #888; }
+  .ops button { padding: 5px 10px; font-size: 12px; margin-left: 6px; }
+  .empty { padding: 40px; text-align: center; color: #93a1b0; }
+  .foot { margin-top: 10px; color: #93a1b0; font-size: 12px; display: flex; gap: 14px; }
+  .foot a { color: #0288d1; cursor: pointer; text-decoration: none; }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="dot" id="svcDot"></div>
+    <h1>fx-recorder</h1>
+    <span id="svcText" style="color:#7a8899"></span>
+    <button id="syncBtn" class="primary">立即同步</button>
+    <button id="svcBtn">…</button>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><span>手机连接</span><b id="stPhone">-</b></div>
+    <div class="stat"><span>最后同步</span><b id="stSync" style="font-size:15px">-</b></div>
+    <div class="stat"><span>会议（手动）</span><b id="stMeet">-</b></div>
+    <div class="stat"><span>话题（自动）</span><b id="stTopic">-</b></div>
+  </div>
+
+  <div class="list" id="list"><div class="empty">加载中…</div></div>
+  <div class="foot">
+    <a id="openDir">打开数据目录</a><a id="openLog">查看日志</a>
+    <span>关闭本窗口不影响后台管线运行</span>
+  </div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const fmtDur = ms => {
+  const m = Math.round(ms / 60000);
+  return m >= 60 ? `${Math.floor(m/60)}时${m%60}分` : `${m}分`;
+};
+const fmtTime = ts => new Date(ts).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit",
+  hour: "2-digit", minute: "2-digit" });
+
+async function refreshSvc() {
+  const s = await window.fx.svcStatus();
+  $("svcDot").classList.toggle("on", s.loaded);
+  $("svcText").textContent = s.loaded ? "管线运行中" : "管线已停止";
+  $("svcBtn").textContent = s.loaded ? "停止服务" : "启动服务";
+  $("svcBtn").className = s.loaded ? "danger" : "primary";
+}
+$("svcBtn").onclick = async () => {
+  const s = await window.fx.svcStatus();
+  await (s.loaded ? window.fx.svcOff() : window.fx.svcOn());
+  refreshSvc();
+};
+$("syncBtn").onclick = async () => {
+  $("syncBtn").disabled = true; $("syncBtn").textContent = "已触发…";
+  await window.fx.syncNow();
+  setTimeout(() => { $("syncBtn").disabled = false; $("syncBtn").textContent = "立即同步"; }, 4000);
+  setTimeout(refreshData, 20000);
+};
+$("openDir").onclick = () => window.fx.openDir();
+$("openLog").onclick = () => window.fx.openLog();
+
+async function refreshData() {
+  const d = await window.fx.getData();
+  $("stPhone").textContent = d.phone_ok ? "在线" : "不可达";
+  $("stSync").textContent = d.last_sync ? fmtTime(d.last_sync) : "-";
+  const meets = d.items.filter(x => x.kind === "meeting");
+  const topics = d.items.filter(x => x.kind === "topic" && x.status !== "low_value");
+  $("stMeet").textContent = meets.length;
+  $("stTopic").textContent = topics.length;
+
+  const rows = [];
+  for (const it of d.items) {
+    const isM = it.kind === "meeting";
+    const title = isM ? "🎙 会议" : "话题";
+    const dur = it.durationMs || 0;
+    const voice = Math.round((it.voiceRatio || 0) * 100);
+    const stateBadge = it.transcript
+      ? '<span class="badge done">已转写</span>'
+      : (it.clip ? '<span class="badge pending">待转写</span>' : '<span class="badge low">未切分</span>');
+    const lowBadge = it.status === "low_value" ? '<span class="badge low">低价值</span>' : "";
+    const ops = [
+      it.transcript ? `<button onclick="fx.openPath('${esc(it.transcript)}')">稿</button>` : "",
+      it.clip ? `<button onclick="fx.showItem('${esc(it.clip)}')">音</button>` : "",
+      it.clip ? `<button onclick="fx.copyText('${esc(it.clip)}')">复制路径</button>` : "",
+    ].join("");
+    rows.push(`<div class="row">
+      <span class="badge ${isM ? "meeting" : ""}">${title}</span>
+      <div class="main">
+        <div class="title">${fmtTime(it.startMs)} · ${fmtDur(dur)}</div>
+        <div class="sub">人声 ${voice}% ${it.note ? "· " + it.note : ""}</div>
+      </div>
+      ${stateBadge}${lowBadge}
+      <div class="ops">${ops}</div>
+    </div>`);
+  }
+  $("list").innerHTML = rows.length ? rows.join("") : '<div class="empty">暂无会议/话题记录</div>';
+}
+function esc(p) { return String(p).replace(/'/g, "\\'"); }
+
+refreshSvc(); refreshData();
+setInterval(refreshSvc, 10000);
+setInterval(refreshData, 15000);
+</script>
+</body>
+</html>

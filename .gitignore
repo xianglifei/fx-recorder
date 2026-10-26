@@ -9,6 +9,7 @@
 .externalNativeBuild
 .cxx
 .kotlin
+node_modules/
 
 # 本地需求文档（含内部信息，不推送）
 docs/

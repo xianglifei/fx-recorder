@@ -1,0 +1,15 @@
+{
+  "name": "fx-recorder-console",
+  "version": "0.1.0",
+  "description": "fx-recorder Mac 控制台：服务开关 / 状态 / 会议记录列表",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^33.4.11"
+  },
+  "allowScripts": {
+    "electron@33.4.11": true
+  }
+}
