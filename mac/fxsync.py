@@ -88,6 +88,62 @@ class Phone:
                   headers={"Content-Type": "application/json"})
 
 
+class AdbSource:
+    """ADB 降级数据源（FR-1.2）：USB 常插场景下 HTTP 失联时的可靠兜底。
+    索引 = run-as 拉手机 SQLite（topics/meetings/sessions）；下载 = adb pull。
+    限制：无法 ack（记 pending_acks，HTTP 恢复后补交，期间手机按 72h 兜底保留）。"""
+
+    def __init__(self, cfg):
+        self.adb = cfg.get("adb_path", str(HOME / "Library/Android/sdk/platform-tools/adb"))
+        self.tmp = DATA_DIR / ".adbtmp"
+
+    def _shell(self, *args, timeout=60):
+        r = subprocess.run([self.adb, *args], capture_output=True, timeout=timeout)
+        if r.returncode != 0:
+            raise RuntimeError(f"adb {args}: {r.stderr.decode()[:120]}")
+        return r.stdout
+
+    def _pull_db(self):
+        self.tmp.mkdir(parents=True, exist_ok=True)
+        import sqlite3
+        for suffix in ("", "-wal", "-shm"):
+            out = self._shell("exec-out", "run-as", "com.fx.recorder",
+                              "cat", f"databases/fx-recorder.db{suffix}")
+            (self.tmp / f"fx-recorder.db{suffix}").write_bytes(out)
+        conn = sqlite3.connect(str(self.tmp / "fx-recorder.db"))
+        return conn
+
+    def load_all(self):
+        """返回与 HTTP API 同构的 files/topics/meetings 列表。"""
+        conn = self._pull_db()
+        cur = conn.cursor()
+        files = [{"id": r[0], "startedAtMs": r[1], "endedAtMs": r[2], "durationMs": r[3],
+                  "sizeBytes": r[4], "status": r[5],
+                  "ackedAtMs": r[6], "closeReason": r[7],
+                  "audio": f"/files/{r[0]}.m4a", "sidecar": f"/files/{r[0]}.json"}
+                 for r in cur.execute(
+                     "SELECT id,startedAt,endedAt,durationMs,sizeBytes,status,ackedAt,closeReason "
+                     "FROM sessions WHERE status='sealed' ORDER BY startedAt")]
+        topics = [{"id": r[0], "startMs": r[1], "endMs": r[2], "durationMs": r[3],
+                   "voiceRatio": r[4], "speechMs": r[5], "burstCount": r[6],
+                   "closeReason": r[7], "status": r[8]}
+                  for r in cur.execute(
+                      "SELECT id,startMs,endMs,durationMs,voiceRatio,speechMs,burstCount,"
+                      "closeReason,status FROM topics WHERE status!='open' ORDER BY startMs")]
+        meetings = [{"id": r[0], "startMs": r[1], "endMs": r[2], "voiceRatio": r[3],
+                     "endSource": r[4], "status": r[5], "note": r[6]}
+                    for r in cur.execute(
+                        "SELECT id,startMs,endMs,voiceRatio,endSource,status,note "
+                        "FROM meetings WHERE status!='open' AND endMs IS NOT NULL ORDER BY startMs")]
+        conn.close()
+        return files, topics, meetings
+
+    def download(self, url_path, dest: Path):
+        remote = f"/sdcard/Android/data/com.fx.recorder/files/recordings/{url_path.split('/')[-1]}"
+        subprocess.run([self.adb, "pull", remote, str(dest)], check=True,
+                       capture_output=True, timeout=300)
+
+
 def load_state():
     if STATE.exists():
         return json.loads(STATE.read_text())
@@ -113,26 +169,49 @@ def sync_once(cfg):
     st = load_state()
     phone = Phone(cfg)
     now = int(time.time() * 1000)
+    files = topics = meetings = None
+    http_ok = False
     try:
         phone.ping()
         phone.pair(cfg["pair_code"])
+        http_ok = True
     except Exception as e:
-        st["phone_ok"] = False
-        # FR-1.4 离线告警：>30 分钟不可达发一次 macOS 通知（成功后重置，可再次告警）
-        if now - st.get("last_success_ts", now) > 30 * 60_000 and not st.get("offline_alerted"):
-            notify_mac("fx-recorder", "手机超过 30 分钟不可达，录音或网络可能中断")
-            st["offline_alerted"] = True
-            log("已发送离线告警通知（>30min 不可达）")
-        st["errors"] = ([f"phone unreachable: {e}"] + st.get("errors", []))[:20]
-        save_state(st)
-        log(f"手机不可达: {e}")
-        return 1
+        # FR-1.2 ADB 降级：HTTP 失联时经 USB 拉取（无法 ack，记 pending）
+        try:
+            files, topics, meetings = AdbSource(cfg).load_all()
+            log("HTTP 不可达，已切换 ADB 通道拉取索引")
+        except Exception as ae:
+            st["phone_ok"] = False
+            # FR-1.4 离线告警：>30 分钟不可达发一次 macOS 通知（成功后重置，可再次告警）
+            if now - st.get("last_success_ts", now) > 30 * 60_000 and not st.get("offline_alerted"):
+                notify_mac("fx-recorder", "手机超过 30 分钟不可达（HTTP 与 ADB 均失败）")
+                st["offline_alerted"] = True
+                log("已发送离线告警通知（>30min 不可达）")
+            st["errors"] = ([f"phone unreachable: {e}"] + st.get("errors", []))[:20]
+            save_state(st)
+            log(f"手机不可达（HTTP+ADB）: {e} / {ae}")
+            return 1
+
     st["phone_ok"] = True
     st["last_success_ts"] = now
     st["offline_alerted"] = False
 
-    # 1) 下载未 ack 的 raw + sidecar，校验后 ack
-    files = phone.api("files")
+    # HTTP 通道可用时：先补交历史 pending ack，再拉索引
+    if http_ok:
+        pending = st.get("pending_acks", [])
+        if pending:
+            try:
+                phone.ack(pending)
+                log(f"补交 ADB 时期的 ack {len(pending)} 个")
+                st["pending_acks"] = []
+            except Exception:
+                pass
+        files = phone.api("files")
+        topics = phone.api("topics")
+        meetings = phone.api("meetings")
+
+    # 下载通道随索引来源走
+    adb = None if http_ok else AdbSource(cfg)
     acked = []
     for f in files:
         if f.get("ackedAtMs") is not None or f["status"] not in ("sealed", "cleaned"):
@@ -142,25 +221,33 @@ def sync_once(cfg):
         js = d / "raw" / f"{f['id']}.json"
         try:
             if not m4a.exists():
-                phone.download(f["audio"], m4a)
-                phone.download(f["sidecar"], js)
-            if m4a.exists() and m4a.stat().st_size == f["sizeBytes"]:
+                if http_ok:
+                    phone.download(f["audio"], m4a)
+                    phone.download(f["sidecar"], js)
+                else:
+                    adb.download(f["audio"], m4a)
+                    adb.download(f["sidecar"], js)
+            if m4a.exists() and (f["sizeBytes"] == 0 or m4a.stat().st_size == f["sizeBytes"]):
                 acked.append(f["id"])
         except Exception as e:
             log(f"下载失败 {f['id']}: {e}")
     if acked:
-        phone.ack(acked)
-        log(f"下载并 ack {len(acked)} 个文件")
+        if http_ok:
+            phone.ack(acked)
+            log(f"下载并 ack {len(acked)} 个文件")
+        else:
+            st["pending_acks"] = list(set(st.get("pending_acks", []) + acked))
+            log(f"ADB 下载 {len(acked)} 个文件（ack 待 HTTP 恢复后补交）")
 
-    # 2) 索引快照
-    st["meetings"] = phone.api("meetings")
-    st["topics"] = phone.api("topics")
+    # 索引快照
+    st["meetings"] = meetings
+    st["topics"] = topics
     st["raw"] = [{"id": f["id"], "startedAtMs": f["startedAtMs"], "endedAtMs": f["endedAtMs"],
                   "status": f["status"], "sizeBytes": f["sizeBytes"]} for f in files]
     st["last_sync"] = int(time.time() * 1000)
     save_state(st)
 
-    # 3) 切分 + 转写
+    # 切分 + 转写
     segment_all(st)
     transcribe_all(cfg, st)
     return 0
