@@ -103,19 +103,32 @@ def day_dir(ts_ms):
     return ARCHIVE / datetime.fromtimestamp(ts_ms / 1000).strftime("%Y-%m-%d")
 
 
+def notify_mac(title, msg):
+    subprocess.run(["osascript", "-e",
+                    f'display notification "{msg}" with title "{title}"'],
+                   capture_output=True)
+
+
 def sync_once(cfg):
     st = load_state()
     phone = Phone(cfg)
+    now = int(time.time() * 1000)
     try:
         phone.ping()
         phone.pair(cfg["pair_code"])
     except Exception as e:
         st["phone_ok"] = False
+        # FR-1.4 离线告警：>30 分钟不可达发一次 macOS 通知（成功后重置，可再次告警）
+        if now - st.get("last_success_ts", now) > 30 * 60_000 and not st.get("offline_alerted"):
+            notify_mac("fx-recorder", "手机超过 30 分钟不可达，录音或网络可能中断")
+            st["offline_alerted"] = True
         st["errors"] = ([f"phone unreachable: {e}"] + st.get("errors", []))[:20]
         save_state(st)
         log(f"手机不可达: {e}")
         return 1
     st["phone_ok"] = True
+    st["last_success_ts"] = now
+    st["offline_alerted"] = False
 
     # 1) 下载未 ack 的 raw + sidecar，校验后 ack
     files = phone.api("files")
