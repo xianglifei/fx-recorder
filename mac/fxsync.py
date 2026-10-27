@@ -145,11 +145,12 @@ class AdbSource:
 
 
 def cleanup_mac(cfg):
-    """FR-5.4 Mac 端存储循环：音频按保留期自动清理（默认 30 天），
-    转写稿(.md/.segments.json)永久保留——数据价值在文字，音频只是原料。
+    """FR-5.4 Mac 端存储循环：音频按保留期自动清理（默认 7 天，用户拍板：
+    手机 72h + Mac 7d 两级保留），转写稿(.md/.segments.json)永久保留——
+    数据价值在文字，音频只是原料。
     磁盘水位兜底：<10GB 时提前清理最老的音频目录直到 >15GB。"""
     import shutil, re
-    retention = cfg.get("mac_retention_days", 30)
+    retention = cfg.get("mac_retention_days", 7)
     if not ARCHIVE.exists():
         return
     from datetime import timedelta
