@@ -134,7 +134,8 @@ class AdbSource:
         meetings = [{"id": r[0], "startMs": r[1], "endMs": r[2], "durationMs": r[3],
                      "voiceRatio": r[4], "endSource": r[5], "status": r[6], "note": r[7]}
                     for r in cur.execute(
-                        "SELECT id,startMs,endMs,durationMs,voiceRatio,endSource,status,note "
+                        "SELECT id,startMs,endMs,(endMs - startMs) AS durationMs,voiceRatio,"
+                        "endSource,status,note "
                         "FROM meetings WHERE status!='open' AND endMs IS NOT NULL ORDER BY startMs")]
         conn.close()
         return files, topics, meetings
