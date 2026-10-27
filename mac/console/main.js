@@ -71,11 +71,13 @@ ipcMain.handle("get-data", async () => {
   let st = {};
   try { st = JSON.parse(fs.readFileSync(STATE, "utf8")); } catch {}
   const items = [];
-  // 会议与话题合并列表（含产物路径）
+  const fileSize = (p) => { try { return fs.statSync(p).size; } catch { return 0; } };
+  // 会议与话题合并列表（含产物路径与大小）
   for (const m of st.meetings || [])
-    items.push({ kind: "meeting", ...m });
+    items.push({ kind: "meeting", ...m, clipSize: m.clip ? fileSize(m.clip) : 0 });
   for (const t of st.topics || []) {
-    if (!t.included_in_meeting) items.push({ kind: "topic", ...t });
+    if (!t.included_in_meeting)
+      items.push({ kind: "topic", ...t, clipSize: t.clip ? fileSize(t.clip) : 0 });
   }
   // 手机连通性
   const ping = await fetch(`http://${(await phoneAddr())}/api/status`, { signal: AbortSignal.timeout(3000) })
