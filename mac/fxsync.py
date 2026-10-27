@@ -249,6 +249,8 @@ background:#0288d1;color:#fff;margin-right:8px}}
 </div>
 {''.join(c for _, c in items) if items else '<div class="card empty">最近 24 小时内没有会议或话题</div>'}
 </div>
+'''
+    page += '''
 <script>
 function exportMd(btn, fname, text) {
   const blob = new Blob(["# " + fname.replace(/\\.md$/, "") + "\\n\\n" + text],
