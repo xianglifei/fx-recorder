@@ -12,6 +12,7 @@
 
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -297,7 +298,60 @@ def cleanup_mac(cfg):
         notify_mac("fx-recorder", "Mac 磁盘紧张，已提前清理最老的音频（转写稿保留）")
 
 
-def load_state():
+# ------------------------------------------------------------ 幻觉清理
+
+# ASR 静默段复读的典型形态：事件标签复读（[SPK][SPK]...）、短语复读（"我查一下，"×N）、
+# 单字/数字复读（"正号正号..."、"5 5 5..."）。以下规则只折叠"病态重复"（阈值保守，
+# 允许真实口头重复 ≤3 次），不改写任何正常内容。
+_RE_TAG_RUN = re.compile(r'(\[[A-Za-z]+\][，。\s]*){4,}')
+_RE_TOKEN_RUN = re.compile(r'(.{1,24}?)\1{3,}')          # 连续复读（含标点/周期循环，中文友好）
+_RE_WORD_RUN = re.compile(r'(\b\S{1,8}\b)([，,、\s]\1){3,}')  # 带分隔的词复读
+
+
+def clean_transcript(text: str) -> str:
+    out_lines, prev, run = [], None, 0
+    for ln in text.splitlines():
+        s = ln.strip()
+        if not s:
+            continue
+        if s == prev:
+            run += 1
+            if run < 3:                # 整行完全相同最多保留 2 次
+                out_lines.append(ln)
+        else:
+            prev, run = s, 0
+            out_lines.append(ln)
+    text = "\n".join(out_lines)
+    text = _RE_TAG_RUN.sub('', text)
+    text = _RE_TOKEN_RUN.sub(r'\1', text)
+    text = _RE_WORD_RUN.sub(r'\1', text)
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
+
+
+def reclean_all():
+    """清理存量转写稿（transcripts/*.md 的正文部分，头部元信息保留）。"""
+    total_before = total_after = 0
+    files = 0
+    for md in ARCHIVE.glob("*/transcripts/*.md"):
+        raw = md.read_text(errors="replace")
+        sep = "\n---\n\n"
+        if sep in raw:
+            head, body = raw.split(sep, 1)
+        else:
+            head, body = "", raw
+        cleaned = clean_transcript(body)
+        if cleaned != body:
+            md.write_text(head + sep + cleaned + "\n" if head else cleaned + "\n")
+        total_before += len(body)
+        total_after += len(cleaned)
+        files += 1
+    log(f"存量清理: {files} 篇，{total_before} → {total_after} 字符"
+        f"（压缩 {100 - total_after * 100 // max(1, total_before)}%）")
+    return files
+
+
+
     if STATE.exists():
         return json.loads(STATE.read_text())
     return {"last_sync": 0, "phone_ok": False, "meetings": [], "topics": [], "raw": [], "errors": []}
@@ -530,6 +584,7 @@ def transcribe_one(cfg, clip: Path, md_out: Path):
         log(f"转写产物缺失 {txt_file}")
         return False
     body = txt_file.read_text()
+    body = clean_transcript(body)   # 静默段复读幻觉清理（[SPK]复读/短语复读/单字复读）
     header = (f"# {clip.stem}\n\n"
               f"- 音频: `{clip.name}`\n"
               f"- 转写时间: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n---\n\n")
@@ -638,6 +693,8 @@ def main():
         install_launchd(); return
     if cmd == "uninstall":
         uninstall_launchd(); return
+    if cmd == "clean":
+        reclean_all(); return
     cfg = load_config()
     if cmd == "once":
         sys.exit(sync_once(cfg))
