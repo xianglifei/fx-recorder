@@ -144,6 +144,60 @@ class AdbSource:
                        capture_output=True, timeout=300)
 
 
+def cleanup_mac(cfg):
+    """FR-5.4 Mac 端存储循环：音频按保留期自动清理（默认 30 天），
+    转写稿(.md/.segments.json)永久保留——数据价值在文字，音频只是原料。
+    磁盘水位兜底：<10GB 时提前清理最老的音频目录直到 >15GB。"""
+    import shutil, re
+    retention = cfg.get("mac_retention_days", 30)
+    if not ARCHIVE.exists():
+        return
+    from datetime import timedelta
+    cutoff_date = datetime.now() - timedelta(days=retention)
+    freed = 0
+    for d in sorted(ARCHIVE.iterdir()):
+        if not d.is_dir() or not re.match(r"\d{4}-\d{2}-\d{2}", d.name):
+            continue
+        try:
+            day = datetime.strptime(d.name, "%Y-%m-%d")
+        except ValueError:
+            continue
+        if day >= cutoff_date:
+            continue
+        # 删除音频目录，保留 transcripts/
+        for sub in ("raw", "meetings", "topics"):
+            p = d / sub
+            if p.exists():
+                size = sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
+                shutil.rmtree(p)
+                freed += size
+        # transcripts 里清理对应音频引用无意义，只清空的中间文件
+        for f in (d / "transcripts").glob("*.transcript.txt"):
+            f.unlink()
+    if freed > 0:
+        gb = freed / 1e9
+        log(f"Mac 清理：删除 {retention} 天前的音频 {gb:.2f} GB（转写稿已保留）")
+        notify_mac("fx-recorder", f"已自动清理 {gb:.1f}GB 过期音频（转写稿保留）")
+    # 磁盘水位兜底（<10GB 清到 >15GB，从最老日期开始）
+    def disk_free_gb():
+        r = subprocess.run(["df", "-g", "/"], capture_output=True, text=True)
+        return int(r.stdout.splitlines()[1].split()[3])
+    if disk_free_gb() < 10:
+        for d in sorted(ARCHIVE.iterdir()):
+            if disk_free_gb() >= 15:
+                break
+            if not d.is_dir():
+                continue
+            size = sum(f.stat().st_size for f in d.rglob("*.m4a") if f.is_file())
+            for sub in ("raw", "meetings", "topics"):
+                p = d / sub
+                if p.exists():
+                    shutil.rmtree(p)
+            if size > 0:
+                log(f"磁盘水位清理: {d.name} 释放 {size/1e9:.2f} GB（保留转写稿）")
+        notify_mac("fx-recorder", "Mac 磁盘紧张，已提前清理最老的音频（转写稿保留）")
+
+
 def load_state():
     if STATE.exists():
         return json.loads(STATE.read_text())
@@ -250,6 +304,11 @@ def sync_once(cfg):
     # 切分 + 转写
     segment_all(st)
     transcribe_all(cfg, st)
+    # Mac 端存储循环（音频到期/磁盘水位）
+    try:
+        cleanup_mac(cfg)
+    except Exception as e:
+        log(f"Mac 清理异常: {e}")
     return 0
 
 
