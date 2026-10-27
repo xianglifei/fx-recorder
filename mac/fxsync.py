@@ -181,8 +181,8 @@ def build_daily_html(cfg, st):
                 fname = f"{Path(clip).stem}.md"
                 body = (f'<details><summary>📖 展开转写稿（{len(text)} 字）</summary>'
                         f'<div class="ops">'
-                        f'<button onclick="exportMd(this, \'{fname}\', this.closest(\'details\').querySelector(\'pre\').textContent)">⬇ 导出 Markdown</button>'
-                        f'<button onclick="copyMd(this.closest(\'details\').querySelector(\'pre\').textContent, this)">复制全文</button>'
+                        f'<button class="export-btn" data-fname="{html_mod.escape(fname)}">⬇ 导出 Markdown</button>'
+                        f'<button class="copy-btn">复制全文</button>'
                         f'<span class="ok" hidden>已复制 ✓</span>'
                         f'</div>'
                         f'<pre style="white-space:pre-wrap">{html_mod.escape(text)}</pre></details>')
@@ -262,13 +262,24 @@ function exportMd(btn, fname, text) {
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
 }
-function copyMd(text, btn) {
-  const ta = document.createElement("textarea");
-  ta.value = text; document.body.appendChild(ta);
-  ta.select(); document.execCommand("copy"); ta.remove();
-  const ok = btn.parentElement.querySelector(".ok");
-  ok.hidden = false; setTimeout(() => ok.hidden = true, 1500);
-}
+// 事件委托：按钮不内联参数（data 属性），规避引号嵌套问题
+document.addEventListener("click", (e) => {
+  const ex = e.target.closest(".export-btn");
+  if (ex) {
+    const pre = ex.closest("details").querySelector("pre");
+    exportMd(ex, ex.dataset.fname, pre.textContent);
+    return;
+  }
+  const cp = e.target.closest(".copy-btn");
+  if (cp) {
+    const pre = cp.closest("details").querySelector("pre");
+    const ta = document.createElement("textarea");
+    ta.value = pre.textContent; document.body.appendChild(ta);
+    ta.select(); document.execCommand("copy"); ta.remove();
+    const ok = cp.parentElement.querySelector(".ok");
+    ok.hidden = false; setTimeout(() => ok.hidden = true, 1500);
+  }
+});
 </script>
 </body></html>'''
     out = DATA_DIR / "今日.html"
