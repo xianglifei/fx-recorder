@@ -254,7 +254,7 @@ background:#0288d1;color:#fff;margin-right:8px}}
 .empty{{padding:60px;text-align:center;color:#93a1b0}}
 </style></head><body><div class="wrap">
 <h1>🎙 fx-recorder · 最近 24 小时</h1>
-<div class="sub">窗口：{since} 至今（滚动） · 管线每 5 分钟自动更新 · 浏览器刷新查看最新 · 更早记录见 archive/</div>
+<div class="sub">窗口：{since} 至今（滚动） · <b>页面生成于 {datetime.now().strftime('%H:%M:%S')}</b>（每 5 分钟自动重建，F5 刷新） · 若时间一直在变而没有新卡片 = 录音正常、暂无新讨论</div>
 <div class="stats">
   <div class="stat"><span>会议（手动打点）</span><b>{n_meet}</b></div>
   <div class="stat"><span>话题（自动检测）</span><b>{n_topic}</b></div>
