@@ -177,7 +177,7 @@ def build_daily_html(cfg, st):
         if transcript:
             try:
                 text = Path(transcript).read_text(errors="replace")
-                fname = f"{clip.stem}.md"
+                fname = f"{Path(clip).stem}.md"
                 body = (f'<details><summary>📖 展开转写稿（{len(text)} 字）</summary>'
                         f'<div class="ops">'
                         f'<button onclick="exportMd(this, {json.dumps(fname)}, this.closest(\'details\').querySelector(\'pre\').textContent)">⬇ 导出 Markdown</button>'
@@ -185,8 +185,8 @@ def build_daily_html(cfg, st):
                         f'<span class="ok" hidden>已复制 ✓</span>'
                         f'</div>'
                         f'<pre style="white-space:pre-wrap">{html_mod.escape(text)}</pre></details>')
-            except Exception:
-                pass
+            except Exception as e:
+                log(f"转写稿内嵌失败 {transcript}: {e}")
         badge = ('<span class="b mtg">🎙 会议</span>' if kind_label == "meeting"
                  else '<span class="b">话题</span>')
         status = it.get("status", "")
