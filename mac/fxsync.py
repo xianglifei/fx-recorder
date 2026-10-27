@@ -144,6 +144,99 @@ class AdbSource:
                        capture_output=True, timeout=300)
 
 
+def build_daily_html(cfg, st):
+    """M-P2 静态日报：每拍生成 ~/fx-recorder-data/今日.html。
+    浏览器收藏一次即可；音频用相对路径可直接播放；转写稿折叠内嵌。"""
+    import html as html_mod
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    def rel(p):
+        try:
+            return str(Path(p).relative_to(DATA_DIR))
+        except Exception:
+            return ""
+
+    def clip_card(it, kind_label):
+        dur = it.get("durationMs", 0)
+        voice = round((it.get("voiceRatio", 0) or 0) * 100)
+        clip = it.get("clip") or ""
+        transcript = it.get("transcript") or ""
+        size_mb = "-"
+        if clip:
+            try:
+                size_mb = f"{Path(clip).stat().st_size / 1048576:.1f} MB"
+            except Exception:
+                pass
+        hhmm = datetime.fromtimestamp(it["startMs"] / 1000).strftime("%H:%M")
+        audio_html = (f'<audio controls preload="none" style="width:100%;height:32px"'
+                      f' src="{html_mod.escape(rel(clip))}"></audio>') if clip else ""
+        body = ""
+        if transcript:
+            try:
+                text = Path(transcript).read_text(errors="replace")
+                body = (f'<details><summary>📖 展开转写稿（{len(text)} 字）</summary>'
+                        f'<pre style="white-space:pre-wrap">{html_mod.escape(text)}</pre></details>')
+            except Exception:
+                pass
+        badge = ('<span class="b mtg">🎙 会议</span>' if kind_label == "meeting"
+                 else '<span class="b">话题</span>')
+        status = it.get("status", "")
+        low = ' <span class="b low">低价值</span>' if status == "low_value" else ""
+        return f'''<div class="card">
+  <div class="row1">{badge}{low}<b>{hhmm}</b> · {max(1, round(dur/60000))} 分钟 · {size_mb} · 人声 {voice}%</div>
+  {audio_html}
+  {body}
+  <div class="path">{html_mod.escape(clip)}</div>
+</div>'''
+
+    items = []
+    for m in st.get("meetings", []):
+        items.append((m["startMs"], clip_card(m, "meeting")))
+    for t in st.get("topics", []):
+        if not t.get("included_in_meeting"):
+            items.append((t["startMs"], clip_card(t, "topic")))
+    items.sort(key=lambda x: -x[0])
+
+    n_meet = len(st.get("meetings", []))
+    n_topic = len([t for t in st.get("topics", []) if not t.get("included_in_meeting")])
+    n_trans = len([1 for _, c in items if "transcript" in c])
+
+    page = f'''<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
+<title>fx-recorder · {today}</title><style>
+*{{box-sizing:border-box;margin:0}} body{{font-family:-apple-system,"PingFang SC",sans-serif;
+background:#f4f6f8;color:#1c2430;padding:24px 16px;line-height:1.6}}
+.wrap{{max-width:820px;margin:0 auto}} h1{{font-size:20px}}
+.sub{{color:#7a8899;font-size:13px;margin:2px 0 16px}}
+.stats{{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap}}
+.stat{{flex:1;min-width:110px;background:#fff;border-radius:12px;padding:10px 14px;
+box-shadow:0 1px 3px rgba(0,0,0,.06)}} .stat b{{display:block;font-size:18px}}
+.stat span{{color:#7a8899;font-size:12px}}
+.card{{background:#fff;border-radius:12px;padding:14px 18px;margin:10px 0;
+box-shadow:0 1px 3px rgba(0,0,0,.06)}}
+.row1{{font-size:14px;margin-bottom:6px}} .row1 b{{font-size:16px}}
+.b{{display:inline-block;font-size:11px;padding:2px 8px;border-radius:10px;
+background:#eef2f5;color:#5a6b7d;margin-right:6px}}
+.b.mtg{{background:#e1f2fc;color:#0277bd}} .b.low{{background:#f0f0f0;color:#888}}
+pre{{background:#f8fafc;border:1px solid #e8edf2;border-radius:8px;padding:12px;
+font-size:13px;margin-top:8px;max-height:420px;overflow:auto}}
+details summary{{cursor:pointer;color:#0288d1;font-size:13px}}
+.path{{color:#b0bcc9;font-size:11px;margin-top:6px;word-break:break-all}}
+.empty{{padding:60px;text-align:center;color:#93a1b0}}
+</style></head><body><div class="wrap">
+<h1>🎙 fx-recorder · {today}</h1>
+<div class="sub">管线每 5 分钟自动更新 · 浏览器刷新查看最新 · 历史记录见数据目录 archive/</div>
+<div class="stats">
+  <div class="stat"><span>会议（手动打点）</span><b>{n_meet}</b></div>
+  <div class="stat"><span>话题（自动检测）</span><b>{n_topic}</b></div>
+  <div class="stat"><span>已转写</span><b>{n_trans}</b></div>
+</div>
+{''.join(c for _, c in items) if items else '<div class="card empty">今天还没有会议或话题</div>'}
+</div></body></html>'''
+    out = DATA_DIR / "今日.html"
+    out.write_text(page)
+    return out
+
+
 def cleanup_mac(cfg):
     """FR-5.4 Mac 端存储循环：音频按保留期自动清理（默认 7 天，用户拍板：
     手机 72h + Mac 7d 两级保留），转写稿(.md/.segments.json)永久保留——
@@ -305,6 +398,11 @@ def sync_once(cfg):
     # 切分 + 转写
     segment_all(st)
     transcribe_all(cfg, st)
+    # 静态日报（今日.html）
+    try:
+        build_daily_html(cfg, st)
+    except Exception as e:
+        log(f"日报生成异常: {e}")
     # Mac 端存储循环（音频到期/磁盘水位）
     try:
         cleanup_mac(cfg)
