@@ -91,6 +91,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         RecordingService.meetingEnd(getApplication())
     }
 
+    fun expediteNow() {
+        RecordingService.expedite(getApplication())
+    }
+
     // ------------------------------------------------------------- settings
 
     fun setWindowMinutes(min: Int) { settings.windowMs = min * 60_000L }

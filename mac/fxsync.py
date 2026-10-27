@@ -177,7 +177,13 @@ def build_daily_html(cfg, st):
         if transcript:
             try:
                 text = Path(transcript).read_text(errors="replace")
+                fname = f"{clip.stem}.md"
                 body = (f'<details><summary>📖 展开转写稿（{len(text)} 字）</summary>'
+                        f'<div class="ops">'
+                        f'<button onclick="exportMd(this, {json.dumps(fname)}, this.closest(\'details\').querySelector(\'pre\').textContent)">⬇ 导出 Markdown</button>'
+                        f'<button onclick="copyMd(this.closest(\'details\').querySelector(\'pre\').textContent, this)">复制全文</button>'
+                        f'<span class="ok" hidden>已复制 ✓</span>'
+                        f'</div>'
                         f'<pre style="white-space:pre-wrap">{html_mod.escape(text)}</pre></details>')
             except Exception:
                 pass
@@ -226,6 +232,11 @@ background:#eef2f5;color:#5a6b7d;margin-right:6px}}
 pre{{background:#f8fafc;border:1px solid #e8edf2;border-radius:8px;padding:12px;
 font-size:13px;margin-top:8px;max-height:420px;overflow:auto}}
 details summary{{cursor:pointer;color:#0288d1;font-size:13px}}
+.ops{{margin:8px 0 4px}}
+.ops button{{border:0;border-radius:8px;padding:6px 14px;font-size:13px;cursor:pointer;
+background:#0288d1;color:#fff;margin-right:8px}}
+.ops button:last-of-type{{background:#e8edf2;color:#1c2430}}
+.ops .ok{{color:#2e7d46;font-size:12px}}
 .path{{color:#b0bcc9;font-size:11px;margin-top:6px;word-break:break-all}}
 .empty{{padding:60px;text-align:center;color:#93a1b0}}
 </style></head><body><div class="wrap">
@@ -237,7 +248,26 @@ details summary{{cursor:pointer;color:#0288d1;font-size:13px}}
   <div class="stat"><span>已转写</span><b>{n_trans}</b></div>
 </div>
 {''.join(c for _, c in items) if items else '<div class="card empty">最近 24 小时内没有会议或话题</div>'}
-</div></body></html>'''
+</div>
+<script>
+function exportMd(btn, fname, text) {
+  const blob = new Blob(["# " + fname.replace(/\\.md$/, "") + "\\n\\n" + text],
+                        {type: "text/markdown;charset=utf-8"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = fname;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+function copyMd(text, btn) {
+  const ta = document.createElement("textarea");
+  ta.value = text; document.body.appendChild(ta);
+  ta.select(); document.execCommand("copy"); ta.remove();
+  const ok = btn.parentElement.querySelector(".ok");
+  ok.hidden = false; setTimeout(() => ok.hidden = true, 1500);
+}
+</script>
+</body></html>'''
     out = DATA_DIR / "今日.html"
     out.write_text(page)
     return out
@@ -615,17 +645,23 @@ def transcribe_all(cfg, st):
 # ------------------------------------------------------------------ probe / status / launchd
 
 def probe(cfg):
-    """30s 轻探测：2 分钟内新关闭的会议 → 立即跑一拍。"""
+    """30s 轻探测：2 分钟内新关闭的会议或话题 → 立即跑一拍。
+    （会议结束打点 / 手机端「立即出稿」按钮都靠它实现 ≈30s 快速出稿）"""
     try:
         phone = Phone(cfg)
         phone.pair(cfg["pair_code"])
         meetings = phone.api("meetings")
+        topics = phone.api("topics")
     except Exception:
         return 0
     now = time.time() * 1000
     for m in meetings:
         if m.get("endMs") and now - m["endMs"] < 120_000:
             log(f"探测到新结束会议 {m['id']}，触发立即同步")
+            return sync_once(cfg)
+    for t in topics:
+        if now - t.get("endMs", 0) < 120_000 and t.get("closeReason") in ("manual", "expedite"):
+            log(f"探测到立即出稿的话题 {t['id']}，触发立即同步")
             return sync_once(cfg)
     return 0
 

@@ -103,6 +103,7 @@ class RecordingEngine(
     private var meetingTimeoutAlerted = false
     private val pendingMeetingStart = AtomicBoolean(false)
     private val pendingMeetingEnd = AtomicBoolean(false)
+    private val pendingExpedite = AtomicBoolean(false)
     private var globalLastVoiceMs = 0L          // 全局最后人声时刻（补齐忘点结束用）
 
     private val frameBuf = ShortArray(VAD_FRAME)
@@ -152,6 +153,16 @@ class RecordingEngine(
         pendingMeetingEnd.set(true)
     }
 
+    /**
+     * 立即出稿（回溯性提交）：没打点但刚聊完的讨论想立刻拿文字稿——
+     * 关闭当前话题（若开着）+ 无条件封盘当前 raw 窗口，音频即刻进入可拉取状态，
+     * 配合 Mac 端 30s 探测实现 ≈30s 内开始转写。
+     */
+    fun expediteNow() {
+        pendingManualSplit.set(true)
+        pendingExpedite.set(true)
+    }
+
     // ---------------------------------------------------------------- loop
 
     private fun loop() {
@@ -192,6 +203,10 @@ class RecordingEngine(
     private fun processBlock(buf: ShortArray, n: Int): Boolean {
         if (pendingMeetingStart.compareAndSet(true, false)) meetingStartImpl()
         if (pendingMeetingEnd.compareAndSet(true, false)) meetingEndImpl()
+        if (pendingExpedite.compareAndSet(true, false)) {
+            // 立即出稿：manualSplit 已在下方 topicFrame 处理关闭话题，这里负责提前封盘
+            if (running) rotateWindow("expedite")
+        }
 
         var blockSumSq = 0.0
         var nonZero = false

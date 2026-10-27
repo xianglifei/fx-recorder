@@ -95,16 +95,22 @@ fun StatusScreen(vm: MainViewModel, permOk: Boolean, requestPerms: () -> Unit) {
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                 )
                 Spacer(Modifier.height(12.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     if (runtime.running) {
                         Button(
                             onClick = { if (runtime.meetingActive) vm.meetingEnd() else vm.meetingStart() },
                         ) { Text(if (runtime.meetingActive) "会议结束" else "🎙 会议开始") }
-                        Button(onClick = { vm.stopRecording() }) { Text("停止录音") }
+                        OutlinedButton(onClick = { vm.expediteNow() }) { Text("⚡ 立即出稿") }
+                        Button(onClick = { vm.stopRecording() }) { Text("停止") }
                     } else {
                         Button(onClick = { if (permOk) vm.startRecording() else requestPerms() }) { Text("开始录音") }
                     }
                 }
+                Text(
+                    "「立即出稿」：没打点但想立刻拿刚才这段的文字稿时点它（关话题+封盘，约半分钟开始转写）",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
 

@@ -67,6 +67,10 @@ class RecordingService : Service(), RecordingEngine.Callback {
                 engine?.meetingEnd()
                 return START_STICKY
             }
+            ACTION_EXPEDITE -> {
+                engine?.expediteNow()
+                return START_STICKY
+            }
             else -> {
                 userStopRequested = false
                 settings.recordingActive = true
@@ -226,6 +230,7 @@ class RecordingService : Service(), RecordingEngine.Callback {
         const val ACTION_MANUAL_SPLIT = "com.fx.recorder.MANUAL_SPLIT"
         const val ACTION_MEETING_START = "com.fx.recorder.MEETING_START"
         const val ACTION_MEETING_END = "com.fx.recorder.MEETING_END"
+        const val ACTION_EXPEDITE = "com.fx.recorder.EXPEDITE"
 
         @Volatile var isRunning: Boolean = false
             private set
@@ -258,6 +263,13 @@ class RecordingService : Service(), RecordingEngine.Callback {
             runCatching {
                 context.startService(
                     Intent(context, RecordingService::class.java).setAction(ACTION_MEETING_END))
+            }
+        }
+
+        fun expedite(context: android.content.Context) {
+            runCatching {
+                context.startService(
+                    Intent(context, RecordingService::class.java).setAction(ACTION_EXPEDITE))
             }
         }
     }
