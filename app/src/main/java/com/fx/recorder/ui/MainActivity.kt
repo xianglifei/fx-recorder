@@ -90,13 +90,21 @@ private fun AppRoot(vm: MainViewModel) {
     val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
         permOk = if (result.values.all { it }) 1 else 0
     }
+    val runtime by vm.runtime.collectAsState()
+
     LaunchedEffect(permOk) {
         if (permOk == 0) permLauncher.launch(PERMISSIONS)
     }
 
+    // 打开即自动开录（常驻录音设备语义）：权限齐备、当前未在录、用户未显式停止过
+    LaunchedEffect(permOk, runtime.running) {
+        if (permOk == 1 && !runtime.running && vm.settings.lastUserAction != "stopped") {
+            vm.startRecording()
+        }
+    }
+
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var showStopDialog by remember { mutableStateOf(false) }
-    val runtime by vm.runtime.collectAsState()
 
     Scaffold(
         topBar = {
