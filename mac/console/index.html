@@ -101,8 +101,13 @@ async function refreshData() {
   $("stMeet").textContent = meets.length;
   $("stTopic").textContent = topics.length;
 
+  // 统一时间线倒序（最新在最上，会议与话题混排）
+  d.items.sort((a, b) => b.startMs - a.startMs);
+
+  const PAGE = 20;   // 默认展示最近 20 条，其余折叠
   const rows = [];
-  for (const it of d.items) {
+  const shown = expanded ? d.items : d.items.slice(0, PAGE);
+  for (const it of shown) {
     const isM = it.kind === "meeting";
     const title = isM ? "🎙 会议" : "话题";
     const dur = it.durationMs || 0;
@@ -127,8 +132,19 @@ async function refreshData() {
       <div class="ops">${ops}</div>
     </div>`);
   }
+  if (!expanded && d.items.length > PAGE) {
+    rows.push(`<div class="row" style="justify-content:center">
+      <button onclick="toggleExpand()">展开全部 ${d.items.length} 条（当前显示最近 ${PAGE} 条）</button>
+    </div>`);
+  } else if (expanded && d.items.length > PAGE) {
+    rows.push(`<div class="row" style="justify-content:center">
+      <button onclick="toggleExpand()">收起，只显示最近 ${PAGE} 条</button>
+    </div>`);
+  }
   $("list").innerHTML = rows.length ? rows.join("") : '<div class="empty">暂无会议/话题记录</div>';
 }
+let expanded = false;
+function toggleExpand() { expanded = !expanded; refreshData(); }
 function esc(p) { return String(p).replace(/'/g, "\\'"); }
 
 refreshSvc(); refreshData();
