@@ -145,10 +145,12 @@ class AdbSource:
 
 
 def build_daily_html(cfg, st):
-    """M-P2 静态日报：每拍生成 ~/fx-recorder-data/今日.html。
-    浏览器收藏一次即可；音频用相对路径可直接播放；转写稿折叠内嵌。"""
+    """静态滚动报告：每拍生成 ~/fx-recorder-data/今日.html，展示最近 24 小时的
+    会议与话题（滚动窗口，不按自然日切分）。浏览器收藏一次即可；音频用相对路径
+    可直接播放；转写稿折叠内嵌。"""
     import html as html_mod
-    today = datetime.now().strftime("%Y-%m-%d")
+    window_ms = 24 * 3600 * 1000
+    cutoff = time.time() * 1000 - window_ms
 
     def rel(p):
         try:
@@ -191,18 +193,21 @@ def build_daily_html(cfg, st):
 
     items = []
     for m in st.get("meetings", []):
-        items.append((m["startMs"], clip_card(m, "meeting")))
+        if m["startMs"] >= cutoff:
+            items.append((m["startMs"], clip_card(m, "meeting")))
     for t in st.get("topics", []):
-        if not t.get("included_in_meeting"):
+        if not t.get("included_in_meeting") and t["startMs"] >= cutoff:
             items.append((t["startMs"], clip_card(t, "topic")))
     items.sort(key=lambda x: -x[0])
 
-    n_meet = len(st.get("meetings", []))
-    n_topic = len([t for t in st.get("topics", []) if not t.get("included_in_meeting")])
+    n_meet = sum(1 for m in st.get("meetings", []) if m["startMs"] >= cutoff)
+    n_topic = sum(1 for t in st.get("topics", [])
+                  if not t.get("included_in_meeting") and t["startMs"] >= cutoff)
     n_trans = len([1 for _, c in items if "transcript" in c])
+    since = datetime.fromtimestamp(cutoff / 1000).strftime("%m-%d %H:%M")
 
     page = f'''<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
-<title>fx-recorder · {today}</title><style>
+<title>fx-recorder · 最近 24 小时</title><style>
 *{{box-sizing:border-box;margin:0}} body{{font-family:-apple-system,"PingFang SC",sans-serif;
 background:#f4f6f8;color:#1c2430;padding:24px 16px;line-height:1.6}}
 .wrap{{max-width:820px;margin:0 auto}} h1{{font-size:20px}}
@@ -223,14 +228,14 @@ details summary{{cursor:pointer;color:#0288d1;font-size:13px}}
 .path{{color:#b0bcc9;font-size:11px;margin-top:6px;word-break:break-all}}
 .empty{{padding:60px;text-align:center;color:#93a1b0}}
 </style></head><body><div class="wrap">
-<h1>🎙 fx-recorder · {today}</h1>
-<div class="sub">管线每 5 分钟自动更新 · 浏览器刷新查看最新 · 历史记录见数据目录 archive/</div>
+<h1>🎙 fx-recorder · 最近 24 小时</h1>
+<div class="sub">窗口：{since} 至今（滚动） · 管线每 5 分钟自动更新 · 浏览器刷新查看最新 · 更早记录见 archive/</div>
 <div class="stats">
   <div class="stat"><span>会议（手动打点）</span><b>{n_meet}</b></div>
   <div class="stat"><span>话题（自动检测）</span><b>{n_topic}</b></div>
   <div class="stat"><span>已转写</span><b>{n_trans}</b></div>
 </div>
-{''.join(c for _, c in items) if items else '<div class="card empty">今天还没有会议或话题</div>'}
+{''.join(c for _, c in items) if items else '<div class="card empty">最近 24 小时内没有会议或话题</div>'}
 </div></body></html>'''
     out = DATA_DIR / "今日.html"
     out.write_text(page)
