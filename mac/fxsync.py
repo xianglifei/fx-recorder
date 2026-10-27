@@ -181,7 +181,7 @@ def build_daily_html(cfg, st):
                 fname = f"{Path(clip).stem}.md"
                 body = (f'<details><summary>📖 展开转写稿（{len(text)} 字）</summary>'
                         f'<div class="ops">'
-                        f'<button onclick="exportMd(this, {json.dumps(fname)}, this.closest(\'details\').querySelector(\'pre\').textContent)">⬇ 导出 Markdown</button>'
+                        f'<button onclick="exportMd(this, \'{fname}\', this.closest(\'details\').querySelector(\'pre\').textContent)">⬇ 导出 Markdown</button>'
                         f'<button onclick="copyMd(this.closest(\'details\').querySelector(\'pre\').textContent, this)">复制全文</button>'
                         f'<span class="ok" hidden>已复制 ✓</span>'
                         f'</div>'
