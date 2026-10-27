@@ -192,8 +192,18 @@ def build_daily_html(cfg, st):
                  else '<span class="b">话题</span>')
         status = it.get("status", "")
         low = ' <span class="b low">低价值</span>' if status == "low_value" else ""
+        summary_html = ""
+        try:
+            sf = Path(transcript).with_suffix(".summary.txt")
+            if sf.exists():
+                s = sf.read_text(errors="replace").strip()
+                if s:
+                    summary_html = f'<div class="sum">{html_mod.escape(s)}</div>'
+        except Exception:
+            pass
         return f'''<div class="card">
   <div class="row1">{badge}{low}<b>{hhmm}</b> · {max(1, round(dur/60000))} 分钟 · {size_mb} · 人声 {voice}%</div>
+  {summary_html}
   {audio_html}
   {body}
   <div class="path">{html_mod.escape(clip)}</div>
@@ -227,6 +237,8 @@ box-shadow:0 1px 3px rgba(0,0,0,.06)}} .stat b{{display:block;font-size:18px}}
 .card{{background:#fff;border-radius:12px;padding:14px 18px;margin:10px 0;
 box-shadow:0 1px 3px rgba(0,0,0,.06)}}
 .row1{{font-size:14px;margin-bottom:6px}} .row1 b{{font-size:16px}}
+.sum{{background:#f0f7ff;border-left:3px solid #0288d1;border-radius:6px;
+padding:8px 12px;font-size:13px;color:#37474f;margin:2px 0 8px;line-height:1.6}}
 .b{{display:inline-block;font-size:11px;padding:2px 8px;border-radius:10px;
 background:#eef2f5;color:#5a6b7d;margin-right:6px}}
 .b.mtg{{background:#e1f2fc;color:#0277bd}} .b.low{{background:#f0f0f0;color:#888}}
@@ -340,6 +352,64 @@ def cleanup_mac(cfg):
             if size > 0:
                 log(f"磁盘水位清理: {d.name} 释放 {size/1e9:.2f} GB（保留转写稿）")
         notify_mac("fx-recorder", "Mac 磁盘紧张，已提前清理最老的音频（转写稿保留）")
+
+
+# ------------------------------------------------------------ LLM 摘要
+
+ZCODE_CONFIG = HOME / ".zcode/v2/config.json"
+
+
+def _llm_creds():
+    """智谱 GLM Coding Plan key 复用 ZCode 客户端配置（无需另行申请）。"""
+    try:
+        cfg = json.loads(ZCODE_CONFIG.read_text())
+        p = cfg["provider"]["builtin:bigmodel-coding-plan"]["options"]
+        return p["baseURL"].rstrip("/"), p["apiKey"]
+    except Exception:
+        return None, None
+
+
+def llm_summarize(text: str) -> str:
+    """转写稿 → 2-3 句要点摘要（glm-4-flash，调用失败抛异常由调用方跳过重试）。"""
+    base, key = _llm_creds()
+    if not key:
+        raise RuntimeError("ZCode config 中未找到 GLM key")
+    prompt = ("你是会议助手。以下是一段办公室讨论的语音转写稿（口语化、可能有识别错误）。"
+              "请用 2-3 句话总结：讨论了什么问题、达成了什么决定或结论、有什么待办。"
+              "直接输出摘要本身，不要任何前缀或解释。\n\n" + text[:6000])
+    body = json.dumps({"model": "glm-4-flash", "max_tokens": 300,
+                       "messages": [{"role": "user", "content": prompt}]}).encode()
+    req = urllib.request.Request(base + "/v1/messages", data=body, headers={
+        "x-api-key": key, "anthropic-version": "2023-06-01",
+        "content-type": "application/json"})
+    with urllib.request.urlopen(req, timeout=120) as r:
+        d = json.loads(r.read())
+    return d["content"][0]["text"].strip()
+
+
+def summarize_all(st):
+    """对每篇转写稿生成同名 .summary.txt（文件即状态，幂等；LLM 失败下拍重试）。"""
+    items = [x for x in (st.get("meetings", []) + st.get("topics", [])) if x.get("transcript")]
+    n = 0
+    for it in items:
+        md = Path(it["transcript"])
+        sf = md.with_suffix(".summary.txt")
+        it["summary_file"] = str(sf)
+        if sf.exists():
+            continue
+        try:
+            raw = md.read_text(errors="replace")
+            body = raw.split("\n---\n\n", 1)[-1]     # 跳过头部元信息
+            summary = llm_summarize(body)
+            if summary:
+                sf.write_text(summary)
+                n += 1
+                log(f"摘要完成: {md.stem} → {summary[:40]}…")
+        except Exception as e:
+            log(f"摘要失败 {md.stem}: {str(e)[:80]}（下拍重试）")
+    if n:
+        save_state(st)
+    return n
 
 
 # ------------------------------------------------------------ 幻觉清理
@@ -501,6 +571,11 @@ def sync_once(cfg):
     # 切分 + 转写
     segment_all(st)
     transcribe_all(cfg, st)
+    # LLM 摘要（失败不阻塞报告生成）
+    try:
+        summarize_all(st)
+    except Exception as e:
+        log(f"摘要环节异常: {e}")
     # 静态日报（今日.html）
     try:
         build_daily_html(cfg, st)
