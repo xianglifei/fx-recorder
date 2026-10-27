@@ -351,7 +351,7 @@ def reclean_all():
     return files
 
 
-
+def load_state():
     if STATE.exists():
         return json.loads(STATE.read_text())
     return {"last_sync": 0, "phone_ok": False, "meetings": [], "topics": [], "raw": [], "errors": []}
