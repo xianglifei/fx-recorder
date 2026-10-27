@@ -131,10 +131,10 @@ class AdbSource:
                   for r in cur.execute(
                       "SELECT id,startMs,endMs,durationMs,voiceRatio,speechMs,burstCount,"
                       "closeReason,status FROM topics WHERE status!='open' ORDER BY startMs")]
-        meetings = [{"id": r[0], "startMs": r[1], "endMs": r[2], "voiceRatio": r[3],
-                     "endSource": r[4], "status": r[5], "note": r[6]}
+        meetings = [{"id": r[0], "startMs": r[1], "endMs": r[2], "durationMs": r[3],
+                     "voiceRatio": r[4], "endSource": r[5], "status": r[6], "note": r[7]}
                     for r in cur.execute(
-                        "SELECT id,startMs,endMs,voiceRatio,endSource,status,note "
+                        "SELECT id,startMs,endMs,durationMs,voiceRatio,endSource,status,note "
                         "FROM meetings WHERE status!='open' AND endMs IS NOT NULL ORDER BY startMs")]
         conn.close()
         return files, topics, meetings
@@ -526,14 +526,16 @@ def overlap_ratio(a_s, a_e, b_s, b_e):
 
 
 def segment_all(st):
-    """手动会议优先切分；与会议重叠>50% 的自动话题跳过（included_in_meeting）。"""
+    """手动会议优先切分；与会议重叠>50% 的自动话题跳过（included_in_meeting）。
+    durationMs 等字段做容错（HTTP 与 ADB 两通道字段来源略有差异）。"""
     done = []
     for m in st.get("meetings", []):
         if m["status"] == "no_voice":
             continue
+        dur_ms = m.get("durationMs") or ((m.get("endMs") or m["startMs"]) - m["startMs"])
         d = day_dir(m["startMs"]); (d / "meetings").mkdir(parents=True, exist_ok=True)
         hhmm = datetime.fromtimestamp(m["startMs"] / 1000).strftime("%H%M")
-        mins = max(1, round(m["durationMs"] / 60000))
+        mins = max(1, round(dur_ms / 60000))
         out = d / "meetings" / f"{hhmm}_会议_{mins}分.m4a"
         if out.exists():
             m["clip"] = str(out)
