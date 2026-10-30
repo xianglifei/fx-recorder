@@ -652,6 +652,9 @@ def segment_all(st):
         if m["status"] == "no_voice":
             continue
         dur_ms = m.get("durationMs") or ((m.get("endMs") or m["startMs"]) - m["startMs"])
+        if dur_ms > 3 * 3600 * 1000:   # 忘点结束的幽灵会议：不切分（真实会议不会 >3h）
+            m["clip"] = None
+            continue
         d = day_dir(m["startMs"]); (d / "meetings").mkdir(parents=True, exist_ok=True)
         hhmm = datetime.fromtimestamp(m["startMs"] / 1000).strftime("%H%M")
         mins = max(1, round(dur_ms / 60000))
@@ -716,10 +719,19 @@ def transcribe_one(cfg, clip: Path, md_out: Path):
 
 
 def transcribe_all(cfg, st):
-    items = [(m, m["clip"]) for m in st.get("meetings", []) if m.get("clip")]
-    items += [(t, t["clip"]) for t in st.get("topics", []) if t.get("clip")]
+    items = [(x, x["clip"]) for x in (st.get("meetings", []) + st.get("topics", []))
+             if x.get("clip")]
     for item, clip in items:
         clip = Path(clip)
+        # 时长护栏：跨度 >3h 的是"忘点结束"的幽灵会议（真实会议不超过此值），
+        # 切出的巨型文件无法转写，跳过并删除已产生的拼接产物
+        dur_h = ((item.get("endMs") or item["startMs"]) - item["startMs"]) / 3600000
+        if dur_h > 3:
+            if clip.exists() and clip.stat().st_size > 200 * 1048576:
+                clip.unlink(missing_ok=True)
+                log(f"跳过超长条目（{dur_h:.1f}h，忘点结束的幽灵会议），已删除 {clip.name}")
+            item["clip"] = None
+            continue
         md = clip.parent.parent / "transcripts" / (clip.stem + ".md")
         item["transcript"] = str(md) if md.exists() else item.get("transcript")
         if md.exists():
